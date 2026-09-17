@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { QRCodeCanvas } from 'qrcode.react';
 
 // Catálogo completo de Comida, Bebidas y Postres
 const PRODUCTOS_DEFAULT = [
@@ -126,6 +127,9 @@ export default function App() {
   const [pedidos, setPedidos] = useState([]);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
+  // Estado para generador de QR
+  const [cantidadMesas, setCantidadMesas] = useState(6);
+
   useEffect(() => {
     const path = window.location.pathname;
     setRuta(path);
@@ -135,25 +139,23 @@ export default function App() {
     if (mesaParam) setMesa(mesaParam);
 
     if (path === '/admin') {
-      // Revisar si ya hay sesión activa en Supabase
       supabase.auth.getSession().then(({ data: { session } }) => {
         setSesion(session);
         if (session) fetchPedidos();
       });
 
-      // Escuchar cambios de sesión (login / logout)
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         setSesion(session);
         if (session) fetchPedidos();
       });
 
       return () => subscription.unsubscribe();
-    } else {
+    } else if (path !== '/qr') {
       fetchProductos();
     }
   }, []);
 
-  // Suscripción en tiempo real para la cocina cuando hay sesión activa
+  // Suscripción en tiempo real para la cocina
   useEffect(() => {
     if (ruta === '/admin' && sesion) {
       const canal = supabase
@@ -205,7 +207,7 @@ export default function App() {
 
       if (error) throw error;
     } catch (err) {
-      setErrorLogin(err.message || 'Credenciales inválidas. Verifica tu correo y contraseña.');
+      setErrorLogin(err.message || 'Credenciales inválidas.');
     } finally {
       setLoadingAdmin(false);
     }
@@ -285,8 +287,8 @@ export default function App() {
       }, 4000);
 
     } catch (err) {
-      console.error('Error al enviar el pedido:', err);
-      alert('Hubo un error al enviar tu pedido a Supabase.');
+      console.error('Error al enviar pedido:', err);
+      alert(`Hubo un error al enviar tu pedido a Supabase: ${err.message || JSON.stringify(err)}`);
     }
   };
 
@@ -294,6 +296,75 @@ export default function App() {
     const cat = p.categoria || p.category || 'Comida';
     return cat.toLowerCase() === categoriaActiva.toLowerCase();
   });
+
+  // ================= VISTA GENERADOR DE QR (/qr) =================
+  if (ruta === '/qr') {
+    const baseUrl = window.location.origin;
+
+    return (
+      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '30px 20px', fontFamily: 'sans-serif' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px', marginBottom: '25px' }}>
+          <div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Generador de Códigos QR 📱</h1>
+            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Crea y descarga los códigos QR para cada mesa de tu restaurante</p>
+          </div>
+          <a href="/" style={{ background: '#0f172a', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem' }}>Ir al Menú</a>
+        </div>
+
+        <div style={{ background: 'white', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '30px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <label style={{ fontWeight: 'bold', fontSize: '0.875rem', color: '#334155' }}>Cantidad total de mesas:</label>
+          <input 
+            type="number" 
+            min="1" 
+            max="50" 
+            value={cantidadMesas} 
+            onChange={(e) => setCantidadMesas(Math.max(1, parseInt(e.target.value) || 1))}
+            style={{ width: '80px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '1rem', fontWeight: 'bold' }}
+          />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '20px' }}>
+          {Array.from({ length: cantidadMesas }, (_, index) => {
+            const numeroMesa = index + 1;
+            const urlMesa = `${baseUrl}/?mesa=${numeroMesa}`;
+
+            return (
+              <div key={numeroMesa} style={{ background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0', padding: '20px', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <h3 style={{ fontWeight: 'bold', fontSize: '1.125rem', color: '#0f172a', margin: '0 0 4px 0' }}>Mesa #{numeroMesa}</h3>
+                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 16px 0', wordBreak: 'break-all' }}>{urlMesa}</p>
+                
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid #f1f5f9', marginBottom: '16px' }}>
+                  <QRCodeCanvas 
+                    id={`qr-mesa-${numeroMesa}`}
+                    value={urlMesa} 
+                    size={150}
+                    level={"H"}
+                    includeMargin={true}
+                  />
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const canvas = document.getElementById(`qr-mesa-${numeroMesa}`);
+                    const pngUrl = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
+                    let downloadLink = document.createElement("a");
+                    downloadLink.href = pngUrl;
+                    downloadLink.download = `Mesa-${numeroMesa}-QR.png`;
+                    document.body.appendChild(downloadLink);
+                    downloadLink.click();
+                    document.body.removeChild(downloadLink);
+                  }}
+                  style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.75rem', cursor: 'pointer', boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)' }}
+                >
+                  Descargar QR 📥
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   // ================= VISTA ADMIN / COCINA (/admin) =================
   if (ruta === '/admin') {
@@ -353,7 +424,10 @@ export default function App() {
             <h1 style={{ fontSize: '1.5rem', fontWeight: '900', margin: '0 0 2px 0' }}>Órdenes en Cocina 🍳</h1>
             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Conectado como: {sesion.user.email}</p>
           </div>
-          <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <a href="/qr" style={{ background: '#f59e0b', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center' }}>Generar QRs 📱</a>
+            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
