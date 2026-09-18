@@ -162,7 +162,7 @@ export default function App() {
     }
   }, [mesa]);
 
-  // Suscripción en tiempo real para el cliente
+  // Suscripción en tiempo real para el cliente (detecta si el mesero libera la mesa)
   useEffect(() => {
     if (ruta === '/') {
       const canalCliente = supabase
@@ -210,10 +210,12 @@ export default function App() {
           setCuentaSolicitada(false);
         }
       } else {
-        // Si ya no existe registro en pedidos, la mesa fue cobrada y liberada
+        // Si no hay datos, significa que la mesa fue liberada por el mesero
+        if (tienePedidoActivo) {
+          setMesaLiberada(true);
+        }
         setTienePedidoActivo(false);
         setCuentaSolicitada(false);
-        setMesaLiberada(true);
       }
     } catch {
       setTienePedidoActivo(false);
