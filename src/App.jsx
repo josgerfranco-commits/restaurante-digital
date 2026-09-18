@@ -118,6 +118,7 @@ export default function App() {
   const [modalCarrito, setModalCarrito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
   const [ordenEnviada, setOrdenEnviada] = useState(false);
+  const [cuentaSolicitada, setCuentaSolicitada] = useState(false);
 
   // Estados para Admin / Cocina y Autenticación Supabase
   const [sesion, setSesion] = useState(null);
@@ -154,8 +155,9 @@ export default function App() {
     } else {
       setRuta('/');
       fetchProductos();
+      verificarEstadoCuentaLocal();
     }
-  }, []);
+  }, [mesa]);
 
   // Suscripción en tiempo real para la cocina
   useEffect(() => {
@@ -172,6 +174,24 @@ export default function App() {
       };
     }
   }, [ruta, sesion]);
+
+  const verificarEstadoCuentaLocal = async () => {
+    try {
+      const { data } = await supabase
+        .from('pedidos')
+        .select('estado')
+        .eq('mesa', `Mesa #${mesa}`)
+        .single();
+      
+      if (data && data.estado === 'cuenta_solicitada') {
+        setCuentaSolicitada(true);
+      } else {
+        setCuentaSolicitada(false);
+      }
+    } catch {
+      setCuentaSolicitada(false);
+    }
+  };
 
   const fetchProductos = async () => {
     try {
@@ -221,17 +241,22 @@ export default function App() {
     setPedidos([]);
   };
 
-  const cambiarEstadoPedido = async (id, nuevoEstado) => {
+  // Liberar mesa desde admin
+  const liberarMesa = async (id) => {
+    const confirmar = window.confirm('¿Deseas cobrar y liberar esta mesa para nuevos clientes?');
+    if (!confirmar) return;
+
     try {
       const { error } = await supabase
         .from('pedidos')
-        .update({ estado: nuevoEstado })
+        .delete()
         .eq('id', id);
       
       if (error) throw error;
       fetchPedidos();
     } catch (err) {
-      console.error('Error al actualizar pedido:', err);
+      console.error('Error al liberar mesa:', err);
+      alert('Hubo un error al liberar la mesa.');
     }
   };
 
@@ -265,23 +290,63 @@ export default function App() {
     return carrito.reduce((acc, item) => acc + (item.precio * item.cantidad), 0).toFixed(2);
   };
 
+  // Enviar pedido o acumular
   const enviarPedido = async (e) => {
     e.preventDefault();
     if (carrito.length === 0) return;
 
     try {
-      const { error } = await supabase.from('pedidos').insert([{
-        mesa: `Mesa #${mesa}`,
-        cliente: nombreCliente || 'Cliente General',
-        items: carrito,
-        total: parseFloat(calcularTotal()),
-        estado: 'pendiente'
-      }]);
+      const nombreMesaStr = `Mesa #${mesa}`;
 
-      if (error) throw error;
+      const { data: pedidosExistentes, error: errorBusqueda } = await supabase
+        .from('pedidos')
+        .select('*')
+        .eq('mesa', nombreMesaStr);
+
+      if (errorBusqueda) throw errorBusqueda;
+
+      if (pedidosExistentes && pedidosExistentes.length > 0) {
+        const pedidoActual = pedidosExistentes[0];
+        const itemsCombinados = [...(pedidoActual.items || [])];
+        
+        carrito.forEach(nuevoItem => {
+          const indexExistente = itemsCombinados.findIndex(i => i.id === nuevoItem.id);
+          if (indexExistente >= 0) {
+            itemsCombinados[indexExistente].cantidad += nuevoItem.cantidad;
+          } else {
+            itemsCombinados.push(nuevoItem);
+          }
+        });
+
+        const nuevoTotal = itemsCombinados.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
+
+        const { error: errorUpdate } = await supabase
+          .from('pedidos')
+          .update({
+            items: itemsCombinados,
+            total: parseFloat(nuevoTotal),
+            cliente: nombreCliente ? `${pedidoActual.cliente} / ${nombreCliente}` : pedidoActual.cliente,
+            estado: 'pendiente'
+          })
+          .eq('id', pedidoActual.id);
+
+        if (errorUpdate) throw errorUpdate;
+
+      } else {
+        const { error: errorInsert } = await supabase.from('pedidos').insert([{
+          mesa: nombreMesaStr,
+          cliente: nombreCliente || 'Cliente General',
+          items: carrito,
+          total: parseFloat(calcularTotal()),
+          estado: 'pendiente'
+        }]);
+
+        if (errorInsert) throw errorInsert;
+      }
 
       setOrdenEnviada(true);
       setCarrito([]);
+      setCuentaSolicitada(false);
       setTimeout(() => {
         setOrdenEnviada(false);
         setModalCarrito(false);
@@ -290,7 +355,36 @@ export default function App() {
 
     } catch (err) {
       console.error('Error al enviar pedido:', err);
-      alert(`Hubo un error al enviar tu pedido a Supabase: ${err.message || JSON.stringify(err)}`);
+      alert(`Hubo un error al enviar tu pedido: ${err.message || JSON.stringify(err)}`);
+    }
+  };
+
+  // Solicitar cuenta
+  const solicitarCuenta = async () => {
+    const confirmar = window.confirm('¿Deseas solicitar tu cuenta al mesero? Ya no podrás agregar más platillos.');
+    if (!confirmar) return;
+
+    try {
+      const nombreMesaStr = `Mesa #${mesa}`;
+      const { data: pedidosExistentes } = await supabase
+        .from('pedidos')
+        .select('*')
+        .eq('mesa', nombreMesaStr);
+
+      if (pedidosExistentes && pedidosExistentes.length > 0) {
+        await supabase
+          .from('pedidos')
+          .update({ estado: 'cuenta_solicitada' })
+          .eq('id', pedidosExistentes[0].id);
+
+        setCuentaSolicitada(true);
+        alert('¡Cuenta solicitada! Un mesero se acercará a cobrar a tu mesa en breve.');
+        setModalCarrito(false);
+      } else {
+        alert('No tienes pedidos activos para solicitar la cuenta.');
+      }
+    } catch (err) {
+      console.error('Error al solicitar cuenta:', err);
     }
   };
 
@@ -434,43 +528,57 @@ export default function App() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
           {pedidos.length === 0 ? (
-            <p style={{ color: '#94a3b8' }}>No hay pedidos registrados en este momento.</p>
+            <p style={{ color: '#94a3b8' }}>No hay mesas ocupadas en este momento.</p>
           ) : (
-            pedidos.map(pedido => (
-              <div key={pedido.id} style={{ background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', padding: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontWeight: 'bold', color: '#d97706' }}>{pedido.mesa}</span>
-                    <span style={{ fontSize: '0.75rem', background: pedido.estado === 'completado' ? '#dcfce7' : '#fef9c3', color: pedido.estado === 'completado' ? '#166534' : '#854d0e', padding: '4px 8px', borderRadius: '6px', fontWeight: '600' }}>
-                      {pedido.estado}
-                    </span>
+            pedidos.map(pedido => {
+              const esCuentaSolicitada = pedido.estado === 'cuenta_solicitada';
+
+              return (
+                <div key={pedido.id} style={{ background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', border: esCuentaSolicitada ? '2px solid #dc2626' : '1px solid #e2e8f0', padding: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontWeight: 'bold', color: '#d97706', fontSize: '1.1rem' }}>{pedido.mesa}</span>
+                      <span style={{ fontSize: '0.75rem', background: esCuentaSolicitada ? '#fee2e2' : '#dcfce7', color: esCuentaSolicitada ? '#991b1b' : '#166534', padding: '4px 8px', borderRadius: '6px', fontWeight: '600' }}>
+                        {esCuentaSolicitada ? '⚠️ CUENTA SOLICITADA' : 'Activa 🟢'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Cliente: {pedido.cliente}</p>
+                    <ul style={{ fontSize: '0.75rem', color: '#475569', listStyle: 'none', padding: 0, margin: '0 0 16px 0', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '8px 0' }}>
+                      {pedido.items && pedido.items.map((item, idx) => (
+                        <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>{item.cantidad}x {item.nombre}</span>
+                          <span>Q {(item.precio * item.cantidad).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Cliente: {pedido.cliente}</p>
-                  <ul style={{ fontSize: '0.75rem', color: '#475569', listStyle: 'none', padding: 0, margin: '0 0 16px 0', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '8px 0' }}>
-                    {pedido.items && pedido.items.map((item, idx) => (
-                      <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span>{item.cantidad}x {item.nombre}</span>
-                        <span>Q {(item.precio * item.cantidad).toFixed(2)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.875rem', marginBottom: '12px' }}>
-                    <span>Total:</span>
-                    <span style={{ color: '#d97706' }}>Q {Number(pedido.total).toFixed(2)}</span>
-                  </div>
-                  {pedido.estado === 'pendiente' && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.875rem', marginBottom: '12px' }}>
+                      <span>Total acumulado:</span>
+                      <span style={{ color: '#d97706' }}>Q {Number(pedido.total).toFixed(2)}</span>
+                    </div>
                     <button 
-                      onClick={() => cambiarEstadoPedido(pedido.id, 'completado')}
-                      style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', width: '100%', cursor: 'pointer', fontSize: '0.875rem' }}
+                      onClick={() => liberarMesa(pedido.id)}
+                      disabled={!esCuentaSolicitada}
+                      style={{ 
+                        background: esCuentaSolicitada ? '#dc2626' : '#cbd5e1', 
+                        color: 'white', 
+                        border: 'none', 
+                        padding: '10px', 
+                        borderRadius: '8px', 
+                        fontWeight: 'bold', 
+                        width: '100%', 
+                        cursor: esCuentaSolicitada ? 'pointer' : 'not-allowed', 
+                        fontSize: '0.875rem', 
+                        boxShadow: esCuentaSolicitada ? '0 2px 6px rgba(220, 38, 38, 0.3)' : 'none' 
+                      }}
                     >
-                      Marcar como Listo ✅
+                      {esCuentaSolicitada ? 'Cobrar y Liberar Mesa 💳' : 'Esperando cuenta... ⏳'}
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -559,9 +667,10 @@ export default function App() {
                       <span style={{ fontWeight: '800', fontSize: '1rem', color: '#0f172a' }}>Q {prodPrecio.toFixed(2)}</span>
                       <button
                         onClick={() => agregarAlCarrito(prod)}
-                        style={{ background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '8px 16px', borderRadius: '12px', fontSize: '0.75rem', cursor: 'pointer', boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)' }}
+                        disabled={cuentaSolicitada}
+                        style={{ background: cuentaSolicitada ? '#94a3b8' : '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '8px 16px', borderRadius: '12px', fontSize: '0.75rem', cursor: cuentaSolicitada ? 'not-allowed' : 'pointer', boxShadow: cuentaSolicitada ? 'none' : '0 2px 6px rgba(245, 158, 11, 0.3)' }}
                       >
-                        Añadir +
+                        {cuentaSolicitada ? 'Cuenta pedida 🧾' : 'Añadir +'}
                       </button>
                     </div>
                   </div>
@@ -587,6 +696,12 @@ export default function App() {
                   <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🎉</div>
                   <h4 style={{ fontWeight: 'bold', fontSize: '1.25rem', color: '#0f172a', margin: '0 0 8px 0' }}>¡Pedido enviado con éxito!</h4>
                   <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>La cocina ya recibió tu orden. ¡Buen provecho!</p>
+                </div>
+              ) : cuentaSolicitada ? (
+                <div style={{ textAlign: 'center', padding: '48px 0' }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🧾</div>
+                  <h4 style={{ fontWeight: 'bold', fontSize: '1.25rem', color: '#0f172a', margin: '0 0 8px 0' }}>Cuenta Solicitada</h4>
+                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Has solicitado tu cuenta. Un mesero se acercará a cobrar a tu mesa en breve.</p>
                 </div>
               ) : carrito.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '64px 0', color: '#94a3b8' }}>
@@ -625,12 +740,21 @@ export default function App() {
                       <span style={{ color: '#d97706' }}>Q {calcularTotal()}</span>
                     </div>
 
-                    <button 
-                      onClick={enviarPedido}
-                      style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
-                    >
-                      Enviar Pedido a Cocina 🚀
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <button 
+                        onClick={enviarPedido}
+                        style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
+                      >
+                        Enviar Pedido a Cocina 🚀
+                      </button>
+
+                      <button 
+                        onClick={solicitarCuenta}
+                        style={{ width: '100%', background: '#dc2626', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)' }}
+                      >
+                        Solicitar Cuenta 🧾
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
