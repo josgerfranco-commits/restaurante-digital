@@ -108,7 +108,7 @@ const PRODUCTOS_DEFAULT = [
 ];
 
 export default function App() {
-  const [ruta, setRuta] = useState(window.location.pathname);
+  const [ruta, setRuta] = useState('/');
   const [mesa, setMesa] = useState('1');
   
   // Estados para Cliente
@@ -131,14 +131,13 @@ export default function App() {
   const [cantidadMesas, setCantidadMesas] = useState(6);
 
   useEffect(() => {
-    const path = window.location.pathname;
-    setRuta(path);
-
+    const rawPath = window.location.pathname.toLowerCase();
     const params = new URLSearchParams(window.location.search);
     const mesaParam = params.get('mesa');
     if (mesaParam) setMesa(mesaParam);
 
-    if (path === '/admin') {
+    if (rawPath.includes('admin')) {
+      setRuta('/admin');
       supabase.auth.getSession().then(({ data: { session } }) => {
         setSesion(session);
         if (session) fetchPedidos();
@@ -150,7 +149,10 @@ export default function App() {
       });
 
       return () => subscription.unsubscribe();
-    } else if (path !== '/qr') {
+    } else if (rawPath.includes('qr')) {
+      setRuta('/qr');
+    } else {
+      setRuta('/');
       fetchProductos();
     }
   }, []);
