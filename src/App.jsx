@@ -117,8 +117,11 @@ export default function App() {
   const [carrito, setCarrito] = useState([]);
   const [modalCarrito, setModalCarrito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
+  const [nitCliente, setNitCliente] = useState('');
   const [ordenEnviada, setOrdenEnviada] = useState(false);
   const [cuentaSolicitada, setCuentaSolicitada] = useState(false);
+  const [tienePedidoActivo, setTienePedidoActivo] = useState(false);
+  const [mesaLiberada, setMesaLiberada] = useState(false);
 
   // Estados para Admin / Cocina y Autenticación Supabase
   const [sesion, setSesion] = useState(null);
@@ -155,14 +158,30 @@ export default function App() {
     } else {
       setRuta('/');
       fetchProductos();
-      verificarEstadoCuentaLocal();
+      verificarEstadoMesa();
     }
   }, [mesa]);
+
+  // Suscripción en tiempo real para el cliente
+  useEffect(() => {
+    if (ruta === '/') {
+      const canalCliente = supabase
+        .channel(`cliente-mesa-${mesa}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+          verificarEstadoMesa();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(canalCliente);
+      };
+    }
+  }, [mesa, ruta]);
 
   // Suscripción en tiempo real para la cocina
   useEffect(() => {
     if (ruta === '/admin' && sesion) {
-      const canal = supabase
+      const canalAdmin = supabase
         .channel('public:pedidos')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
           fetchPedidos();
@@ -170,25 +189,34 @@ export default function App() {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(canal);
+        supabase.removeChannel(canalAdmin);
       };
     }
   }, [ruta, sesion]);
 
-  const verificarEstadoCuentaLocal = async () => {
+  const verificarEstadoMesa = async () => {
     try {
       const { data } = await supabase
         .from('pedidos')
-        .select('estado')
-        .eq('mesa', `Mesa #${mesa}`)
-        .single();
+        .select('*')
+        .eq('mesa', `Mesa #${mesa}`);
       
-      if (data && data.estado === 'cuenta_solicitada') {
-        setCuentaSolicitada(true);
+      if (data && data.length > 0) {
+        setTienePedidoActivo(true);
+        setMesaLiberada(false);
+        if (data[0].estado === 'cuenta_solicitada') {
+          setCuentaSolicitada(true);
+        } else {
+          setCuentaSolicitada(false);
+        }
       } else {
+        // Si ya no existe registro en pedidos, la mesa fue cobrada y liberada
+        setTienePedidoActivo(false);
         setCuentaSolicitada(false);
+        setMesaLiberada(true);
       }
     } catch {
+      setTienePedidoActivo(false);
       setCuentaSolicitada(false);
     }
   };
@@ -295,6 +323,11 @@ export default function App() {
     e.preventDefault();
     if (carrito.length === 0) return;
 
+    if (!tienePedidoActivo && (!nombreCliente.trim() || !nitCliente.trim())) {
+      alert('Por favor, ingresa el nombre del cliente y el NIT antes de enviar tu primer pedido.');
+      return;
+    }
+
     try {
       const nombreMesaStr = `Mesa #${mesa}`;
 
@@ -325,7 +358,6 @@ export default function App() {
           .update({
             items: itemsCombinados,
             total: parseFloat(nuevoTotal),
-            cliente: nombreCliente ? `${pedidoActual.cliente} / ${nombreCliente}` : pedidoActual.cliente,
             estado: 'pendiente'
           })
           .eq('id', pedidoActual.id);
@@ -333,15 +365,18 @@ export default function App() {
         if (errorUpdate) throw errorUpdate;
 
       } else {
+        const infoClienteStr = `${nombreCliente.trim()} (NIT: ${nitCliente.trim()})`;
+
         const { error: errorInsert } = await supabase.from('pedidos').insert([{
           mesa: nombreMesaStr,
-          cliente: nombreCliente || 'Cliente General',
+          cliente: infoClienteStr,
           items: carrito,
           total: parseFloat(calcularTotal()),
           estado: 'pendiente'
         }]);
 
         if (errorInsert) throw errorInsert;
+        setTienePedidoActivo(true);
       }
 
       setOrdenEnviada(true);
@@ -350,7 +385,6 @@ export default function App() {
       setTimeout(() => {
         setOrdenEnviada(false);
         setModalCarrito(false);
-        setNombreCliente('');
       }, 4000);
 
     } catch (err) {
@@ -379,7 +413,6 @@ export default function App() {
 
         setCuentaSolicitada(true);
         alert('¡Cuenta solicitada! Un mesero se acercará a cobrar a tu mesa en breve.');
-        setModalCarrito(false);
       } else {
         alert('No tienes pedidos activos para solicitar la cuenta.');
       }
@@ -542,7 +575,7 @@ export default function App() {
                         {esCuentaSolicitada ? '⚠️ CUENTA SOLICITADA' : 'Activa 🟢'}
                       </span>
                     </div>
-                    <p style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Cliente: {pedido.cliente}</p>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>{pedido.cliente}</p>
                     <ul style={{ fontSize: '0.75rem', color: '#475569', listStyle: 'none', padding: 0, margin: '0 0 16px 0', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '8px 0' }}>
                       {pedido.items && pedido.items.map((item, idx) => (
                         <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -586,6 +619,18 @@ export default function App() {
   }
 
   // ================= VISTA CLIENTE / MENÚ DIGITAL =================
+  if (mesaLiberada) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', padding: '20px', fontFamily: 'sans-serif' }}>
+        <div style={{ background: 'white', padding: '40px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', textAlign: 'center', maxWidth: '450px', width: '100%', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>✨</div>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#0f172a', margin: '0 0 12px 0' }}>¡Gracias por compartir con nosotros!</h1>
+          <p style={{ fontSize: '1rem', color: '#64748b', lineHeight: '1.5', margin: 0 }}>Esperamos que vuelva pronto.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b', paddingBottom: '80px' }}>
       <header style={{ background: 'white', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 30, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -642,7 +687,7 @@ export default function App() {
         </div>
 
         {/* Lista de Productos */}
-        <div style={{ display: 'grid', gap: '16px' }}>
+        <div style={{ display: 'grid', gap: '16px', marginBottom: '32px' }}>
           {productosFiltrados.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 0', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
               <p style={{ color: '#94a3b8', margin: 0 }}>No hay productos disponibles en esta categoría.</p>
@@ -678,6 +723,29 @@ export default function App() {
               );
             })
           )}
+        </div>
+
+        {/* Botón Solicitar Cuenta al final de la página */}
+        <div style={{ textAlign: 'center', marginTop: '20px' }}>
+          <button
+            onClick={solicitarCuenta}
+            disabled={cuentaSolicitada}
+            style={{
+              width: '100%',
+              maxWidth: '300px',
+              background: cuentaSolicitada ? '#64748b' : '#dc2626',
+              color: 'white',
+              border: 'none',
+              padding: '14px 20px',
+              borderRadius: '12px',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: cuentaSolicitada ? 'not-allowed' : 'pointer',
+              boxShadow: cuentaSolicitada ? 'none' : '0 4px 12px rgba(220, 38, 38, 0.3)'
+            }}
+          >
+            {cuentaSolicitada ? 'Cuenta Solicitada 🧾' : 'Solicitar Cuenta 🧾'}
+          </button>
         </div>
       </main>
 
@@ -727,34 +795,46 @@ export default function App() {
                   </div>
 
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Tu Nombre o Referencia (Opcional)</label>
-                    <input 
-                      type="text" 
-                      placeholder="Ej. Juan Pérez"
-                      value={nombreCliente}
-                      onChange={(e) => setNombreCliente(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', marginBottom: '16px', boxSizing: 'border-box' }}
-                    />
+                    {/* Campos de Cliente y NIT condicionales */}
+                    {!tienePedidoActivo && (
+                      <>
+                        <div style={{ marginBottom: '12px' }}>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Cliente <span style={{ color: '#dc2626' }}>*</span></label>
+                          <input 
+                            type="text" 
+                            placeholder="Ej. Juan Pérez"
+                            value={nombreCliente}
+                            onChange={(e) => setNombreCliente(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }}
+                          />
+                        </div>
+
+                        <div style={{ marginBottom: '16px' }}>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>NIT <span style={{ color: '#dc2626' }}>*</span></label>
+                          <input 
+                            type="text" 
+                            placeholder="Ej. 1234567-8 o C/F"
+                            value={nitCliente}
+                            onChange={(e) => setNitCliente(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      </>
+                    )}
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold', color: '#0f172a', marginBottom: '16px' }}>
                       <span>Total a pagar:</span>
                       <span style={{ color: '#d97706' }}>Q {calcularTotal()}</span>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <button 
-                        onClick={enviarPedido}
-                        style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
-                      >
-                        Enviar Pedido a Cocina 🚀
-                      </button>
-
-                      <button 
-                        onClick={solicitarCuenta}
-                        style={{ width: '100%', background: '#dc2626', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)' }}
-                      >
-                        Solicitar Cuenta 🧾
-                      </button>
-                    </div>
+                    <button 
+                      onClick={enviarPedido}
+                      style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
+                    >
+                      Enviar Pedido a Cocina 🚀
+                    </button>
                   </div>
                 </>
               )}
