@@ -31,7 +31,9 @@ export default function App() {
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
   // Estados para Administrar Productos en Admin
-  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
+  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
+  const [archivoImagen, setArchivoImagen] = useState(null);
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
 
   // Estado para generador de QR
   const [cantidadMesas, setCantidadMesas] = useState(6);
@@ -226,23 +228,49 @@ export default function App() {
       return;
     }
 
+    setSubiendoImagen(true);
+
     try {
+      let imagenUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80';
+
+      // Subir archivo a Supabase Storage si se seleccionó uno
+      if (archivoImagen) {
+        const nombreArchivo = `${Date.now()}-${archivoImagen.name}`;
+        const { error: errorUpload } = await supabase.storage
+          .from('productos-imagenes')
+          .upload(nombreArchivo, archivoImagen);
+
+        if (errorUpload) throw errorUpload;
+
+        // Obtener la URL pública del archivo subido
+        const { data: publicData } = supabase.storage
+          .from('productos-imagenes')
+          .getPublicUrl(nombreArchivo);
+
+        if (publicData) {
+          imagenUrl = publicData.publicUrl;
+        }
+      }
+
       const { error } = await supabase.from('productos').insert([{
         nombre: nuevoProd.nombre,
         descripcion: nuevoProd.descripcion,
         precio: parseFloat(nuevoProd.precio),
         categoria: nuevoProd.categoria,
-        imagen: nuevoProd.imagen || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+        imagen: imagenUrl
       }]);
 
       if (error) throw error;
 
-      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
+      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
+      setArchivoImagen(null);
       alert('¡Producto agregado exitosamente al menú!');
       fetchProductos();
     } catch (err) {
       console.error('Error al guardar producto:', err);
-      alert('Hubo un error al guardar el producto.');
+      alert('Hubo un error al guardar el producto: ' + err.message);
+    } finally {
+      setSubiendoImagen(false);
     }
   };
 
@@ -265,7 +293,6 @@ export default function App() {
     if (!confirmar) return;
 
     try {
-      // 1. Guardar en el historial de ventas
       const { error: errorVenta } = await supabase.from('ventas_historicas').insert([{
         mesa: pedidoObj.mesa,
         cliente: pedidoObj.cliente,
@@ -275,7 +302,6 @@ export default function App() {
 
       if (errorVenta) throw errorVenta;
 
-      // 2. Eliminar el pedido activo de la mesa
       const { error: errorDelete } = await supabase.from('pedidos').delete().eq('id', pedidoObj.id);
       if (errorDelete) throw errorDelete;
 
@@ -593,7 +619,7 @@ export default function App() {
     );
   }
 
-  // ================= VISTA ADMIN (/admin) - GESTIÓN DE MENÚ + REPORTES E INVENTARIO =================
+  // ================= VISTA ADMIN (/admin) - GESTIÓN DE MENÚ + ARCHIVO DE IMAGEN =================
   if (ruta === '/admin') {
     if (!sesion) {
       return (
@@ -624,16 +650,13 @@ export default function App() {
       );
     }
 
-    // --- CÁLCULOS DE VENTAS USANDO EL HISTORIAL DE VENTAS ---
-    const hoyStr = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
-    const mesActualStr = hoyStr.substring(0, 7); // Formato YYYY-MM
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const mesActualStr = hoyStr.substring(0, 7);
 
-    // Ventas del día
     const ventasDelDia = ventasHistoricas
       .filter(v => v.created_at && v.created_at.startsWith(hoyStr))
       .reduce((acc, v) => acc + Number(v.total || 0), 0);
 
-    // Ventas del mes
     const ventasDelMes = ventasHistoricas
       .filter(v => v.created_at && v.created_at.startsWith(mesActualStr))
       .reduce((acc, v) => acc + Number(v.total || 0), 0);
@@ -652,9 +675,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* SECCIÓN 1: AGREGAR PRODUCTOS AL MENÚ */}
+        {/* SECCIÓN 1: AGREGAR PRODUCTOS AL MENÚ CON SELECCIÓN DE ARCHIVO */}
         <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '35px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>🍽 Agregar Nuevo Platillo, Bebida o Postre</h2>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>🍽️ Agregar Nuevo Platillo, Bebida o Postre</h2>
           <form onSubmit={guardarProducto} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Nombre del Producto *</label>
@@ -673,16 +696,21 @@ export default function App() {
               <input type="number" step="0.01" placeholder="45.00" value={nuevoProd.precio} onChange={e => setNuevoProd({...nuevoProd, precio: e.target.value})} required style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>URL de Imagen (Opcional)</label>
-              <input type="text" placeholder="https://imagen.com/foto.jpg" value={nuevoProd.imagen} onChange={e => setNuevoProd({...nuevoProd, imagen: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Foto desde la Computadora</label>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={e => setArchivoImagen(e.target.files[0])} 
+                style={{ width: '100%', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box', background: '#f8fafc', fontSize: '0.75rem' }} 
+              />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Descripción</label>
               <input type="text" placeholder="Breve descripción de ingredientes o preparación..." value={nuevoProd.descripcion} onChange={e => setNuevoProd({...nuevoProd, descripcion: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <button type="submit" style={{ background: '#10b981', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
-                Guardar en el Menú Digital ➕
+              <button type="submit" disabled={subiendoImagen} style={{ background: '#10b981', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
+                {subiendoImagen ? 'Subiendo imagen y guardando...' : 'Guardar en el Menú Digital ➕'}
               </button>
             </div>
           </form>
@@ -700,11 +728,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* SECCIÓN 2: DASHBOARD DE REPORTES, VENTAS Y ÚLTIMOS 3 MESES */}
+        {/* SECCIÓN 2: DASHBOARD DE REPORTES */}
         <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '35px' }}>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>📊 Dashboard de Ventas y Reportes</h2>
-          
-          {/* Tarjetas Resumen (Día, Mes y Total) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>VENTAS DE HOY 📅</p>
@@ -720,7 +746,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Subsección: Historial de Ventas de los Últimos 3 Meses */}
           <div style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '12px' }}>🗓️ Historial de Ventas de los Últimos 3 Meses</h3>
             {(() => {
