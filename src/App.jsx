@@ -21,7 +21,7 @@ export default function App() {
   // Estado para las observaciones del cliente por cada producto
   const [observacionesTemp, setObservacionesTemp] = useState({});
 
-  // Estados para Admin / Cocina y Autenticación Supabase
+  // Estados para Admin / Cocina / Mesas y Autenticación Supabase
   const [sesion, setSesion] = useState(null);
   const [emailLogin, setEmailLogin] = useState('');
   const [passwordLogin, setPasswordLogin] = useState('');
@@ -31,12 +31,16 @@ export default function App() {
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
   // Estados para Administrar Productos en Admin
-  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
-  const [archivoImagen, setArchivoImagen] = useState(null);
-  const [subiendoImagen, setSubiendoImagen] = useState(false);
+  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
 
   // Estado para generador de QR
   const [cantidadMesas, setCantidadMesas] = useState(6);
+
+  // Función para navegar sin recargar y manteniendo la misma pestaña
+  const navegarA = (nuevaRuta) => {
+    window.history.pushState({}, '', nuevaRuta);
+    setRuta(nuevaRuta);
+  };
 
   useEffect(() => {
     const rawPath = window.location.pathname.toLowerCase();
@@ -46,9 +50,12 @@ export default function App() {
 
     fetchProductos();
 
-    if (rawPath.includes('admin') || rawPath.includes('cocina')) {
+    if (rawPath.includes('admin') || rawPath.includes('cocina') || rawPath.includes('mesas')) {
       if (rawPath.includes('cocina')) {
         setRuta('/cocina');
+        fetchPedidos();
+      } else if (rawPath.includes('mesas')) {
+        setRuta('/mesas');
         fetchPedidos();
       } else {
         setRuta('/admin');
@@ -109,7 +116,7 @@ export default function App() {
   }, [mesa, ruta]);
 
   useEffect(() => {
-    if ((ruta === '/admin' || ruta === '/cocina') && sesion) {
+    if ((ruta === '/admin' || ruta === '/cocina' || ruta === '/mesas') && sesion) {
       const canalAdminCocina = supabase
         .channel('public:pedidos')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
@@ -141,11 +148,8 @@ export default function App() {
       if (data && data.length > 0) {
         setTienePedidoActivo(true);
         setMesaLiberada(false);
-        if (data[0].estado === 'cuenta_solicitada') {
-          setCuentaSolicitada(true);
-        } else {
-          setCuentaSolicitada(false);
-        }
+        const hayCuentaSolicitada = data.some(p => p.estado === 'cuenta_solicitada');
+        setCuentaSolicitada(hayCuentaSolicitada);
       } else {
         if (tienePedidoActivo) {
           setMesaLiberada(true);
@@ -174,7 +178,7 @@ export default function App() {
       const { data, error } = await supabase
         .from('pedidos')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: true });
       if (error) throw error;
       if (data) setPedidos(data);
     } catch (err) {
@@ -228,49 +232,23 @@ export default function App() {
       return;
     }
 
-    setSubiendoImagen(true);
-
     try {
-      let imagenUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80';
-
-      // Subir archivo a Supabase Storage si se seleccionó uno
-      if (archivoImagen) {
-        const nombreArchivo = `${Date.now()}-${archivoImagen.name}`;
-        const { error: errorUpload } = await supabase.storage
-          .from('productos-imagenes')
-          .upload(nombreArchivo, archivoImagen);
-
-        if (errorUpload) throw errorUpload;
-
-        // Obtener la URL pública del archivo subido
-        const { data: publicData } = supabase.storage
-          .from('productos-imagenes')
-          .getPublicUrl(nombreArchivo);
-
-        if (publicData) {
-          imagenUrl = publicData.publicUrl;
-        }
-      }
-
       const { error } = await supabase.from('productos').insert([{
         nombre: nuevoProd.nombre,
         descripcion: nuevoProd.descripcion,
         precio: parseFloat(nuevoProd.precio),
         categoria: nuevoProd.categoria,
-        imagen: imagenUrl
+        imagen: nuevoProd.imagen || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
       }]);
 
       if (error) throw error;
 
-      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
-      setArchivoImagen(null);
+      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
       alert('¡Producto agregado exitosamente al menú!');
       fetchProductos();
     } catch (err) {
       console.error('Error al guardar producto:', err);
-      alert('Hubo un error al guardar el producto: ' + err.message);
-    } finally {
-      setSubiendoImagen(false);
+      alert('Hubo un error al guardar el producto.');
     }
   };
 
@@ -288,21 +266,43 @@ export default function App() {
     }
   };
 
-  const liberarMesa = async (pedidoObj) => {
-    const confirmar = window.confirm(`¿Deseas cobrar Q ${Number(pedidoObj.total).toFixed(2)} y liberar la ${pedidoObj.mesa}?`);
+  const despacharOrdenCocina = async (idPedido) => {
+    try {
+      const { error } = await supabase
+        .from('pedidos')
+        .update({ estado: 'despachado' })
+        .eq('id', idPedido);
+
+      if (error) throw error;
+      fetchPedidos();
+    } catch (err) {
+      console.error('Error al despachar la orden:', err);
+      alert('No se pudo marcar la orden como despachada.');
+    }
+  };
+
+  const liberarMesaGrupo = async (nombreMesa, pedidosMesa, itemsConsolidados, totalMesa) => {
+    const clienteMesa = pedidosMesa[0]?.cliente || 'Cliente';
+
+    const confirmar = window.confirm(`¿Deseas cobrar Q ${totalMesa.toFixed(2)} y liberar la ${nombreMesa}?`);
     if (!confirmar) return;
 
     try {
       const { error: errorVenta } = await supabase.from('ventas_historicas').insert([{
-        mesa: pedidoObj.mesa,
-        cliente: pedidoObj.cliente,
-        items: pedidoObj.items,
-        total: parseFloat(pedidoObj.total)
+        mesa: nombreMesa,
+        cliente: clienteMesa,
+        items: itemsConsolidados,
+        total: parseFloat(totalMesa)
       }]);
 
       if (errorVenta) throw errorVenta;
 
-      const { error: errorDelete } = await supabase.from('pedidos').delete().eq('id', pedidoObj.id);
+      const idsEliminar = pedidosMesa.map(p => p.id);
+      const { error: errorDelete } = await supabase
+        .from('pedidos')
+        .delete()
+        .in('id', idsEliminar);
+
       if (errorDelete) throw errorDelete;
 
       fetchPedidos();
@@ -360,57 +360,32 @@ export default function App() {
 
     try {
       const nombreMesaStr = `Mesa #${mesa}`;
-      const { data: pedidosExistentes, error: errorBusqueda } = await supabase
+
+      let infoClienteStr = `${nombreCliente.trim()} (NIT: ${nitCliente.trim()})`;
+      const { data: pedidosExistentes } = await supabase
         .from('pedidos')
-        .select('*')
+        .select('cliente')
         .eq('mesa', nombreMesaStr);
 
-      if (errorBusqueda) throw errorBusqueda;
-
       if (pedidosExistentes && pedidosExistentes.length > 0) {
-        const pedidoActual = pedidosExistentes[0];
-        const itemsCombinados = [...(pedidoActual.items || [])];
-        
-        carrito.forEach(nuevoItem => {
-          const indexExistente = itemsCombinados.findIndex(i => i.cartItemId === nuevoItem.cartItemId);
-          if (indexExistente >= 0) {
-            itemsCombinados[indexExistente].cantidad += nuevoItem.cantidad;
-          } else {
-            itemsCombinados.push(nuevoItem);
-          }
-        });
-
-        const nuevoTotal = itemsCombinados.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
-
-        const { error: errorUpdate } = await supabase
-          .from('pedidos')
-          .update({
-            items: itemsCombinados,
-            total: parseFloat(nuevoTotal),
-            estado: 'pendiente'
-          })
-          .eq('id', pedidoActual.id);
-
-        if (errorUpdate) throw errorUpdate;
-
-      } else {
-        const infoClienteStr = `${nombreCliente.trim()} (NIT: ${nitCliente.trim()})`;
-
-        const { error: errorInsert } = await supabase.from('pedidos').insert([{
-          mesa: nombreMesaStr,
-          cliente: infoClienteStr,
-          items: carrito,
-          total: parseFloat(calcularTotal()),
-          estado: 'pendiente'
-        }]);
-
-        if (errorInsert) throw errorInsert;
-        setTienePedidoActivo(true);
+        infoClienteStr = pedidosExistentes[0].cliente;
       }
 
+      const { error: errorInsert } = await supabase.from('pedidos').insert([{
+        mesa: nombreMesaStr,
+        cliente: infoClienteStr,
+        items: carrito,
+        total: parseFloat(calcularTotal()),
+        estado: 'pendiente'
+      }]);
+
+      if (errorInsert) throw errorInsert;
+
+      setTienePedidoActivo(true);
       setOrdenEnviada(true);
       setCarrito([]);
       setCuentaSolicitada(false);
+
       setTimeout(() => {
         setOrdenEnviada(false);
         setModalCarrito(false);
@@ -428,20 +403,13 @@ export default function App() {
 
     try {
       const nombreMesaStr = `Mesa #${mesa}`;
-      const { data: pedidosExistentes } = await supabase
+      await supabase
         .from('pedidos')
-        .select('*')
+        .update({ estado: 'cuenta_solicitada' })
         .eq('mesa', nombreMesaStr);
 
-      if (pedidosExistentes && pedidosExistentes.length > 0) {
-        await supabase
-          .from('pedidos')
-          .update({ estado: 'cuenta_solicitada' })
-          .eq('id', pedidosExistentes[0].id);
-
-        setCuentaSolicitada(true);
-        alert('¡Cuenta solicitada! Un mesero se acercará a cobrar en breve.');
-      }
+      setCuentaSolicitada(true);
+      alert('¡Cuenta solicitada! Un mesero se acercará a cobrar en breve.');
     } catch (err) {
       console.error('Error al solicitar cuenta:', err);
     }
@@ -451,6 +419,143 @@ export default function App() {
     const cat = p.categoria || 'Comida';
     return cat.toLowerCase() === categoriaActiva.toLowerCase();
   });
+
+  // ================= VISTA DETALLE DE MESAS (/mesas) =================
+  if (ruta === '/mesas') {
+    if (!sesion) {
+      return (
+        <div style={{ maxWidth: '400px', margin: '80px auto', background: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0', fontFamily: 'sans-serif' }}>
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 4px 0' }}>Detalle de Mesas 🪑</h2>
+            <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Inicia sesión para ver el detalle de las mesas</p>
+          </div>
+          {errorLogin && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '10px', borderRadius: '8px', fontSize: '0.75rem', marginBottom: '16px', textAlign: 'center' }}>
+              {errorLogin}
+            </div>
+          )}
+          <form onSubmit={manejarLogin}>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Correo Electrónico</label>
+              <input type="email" value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Contraseña</label>
+              <input type="password" value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box' }} />
+            </div>
+            <button type="submit" disabled={loadingAdmin} style={{ width: '100%', background: '#0f172a', color: 'white', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+              {loadingAdmin ? 'Verificando...' : 'Ingresar'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    const mesasAgrupadas = pedidos.reduce((acc, p) => {
+      if (!acc[p.mesa]) acc[p.mesa] = [];
+      acc[p.mesa].push(p);
+      return acc;
+    }, {});
+
+    return (
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px', fontFamily: 'sans-serif' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px', marginBottom: '25px' }}>
+          <div>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Ficha de Mesas 🪑</h1>
+            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Gestión y cobro de mesas activas (Consolidado)</p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={() => navegarA('/admin')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>Ir al Panel Admin 🛠️</button>
+            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+          {Object.keys(mesasAgrupadas).length === 0 ? (
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '60px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+              <p style={{ fontSize: '1.2rem', color: '#94a3b8', margin: 0 }}>No hay mesas ocupadas en este momento.</p>
+            </div>
+          ) : (
+            Object.entries(mesasAgrupadas).map(([nombreMesa, listaPedidos]) => {
+              const esCuentaSolicitada = listaPedidos.some(p => p.estado === 'cuenta_solicitada');
+              const cliente = listaPedidos[0]?.cliente || 'Cliente';
+              const totalAcumulado = listaPedidos.reduce((acc, p) => acc + Number(p.total || 0), 0);
+              
+              const mapaConsolidado = {};
+              listaPedidos.flatMap(p => p.items || []).forEach(item => {
+                const key = `${item.nombre}-${(item.notas || '').trim()}`;
+                if (mapaConsolidado[key]) {
+                  mapaConsolidado[key].cantidad += item.cantidad;
+                } else {
+                  mapaConsolidado[key] = { ...item };
+                }
+              });
+
+              const itemsConsolidados = Object.values(mapaConsolidado);
+
+              return (
+                <div key={nombreMesa} style={{ background: 'white', borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', border: esCuentaSolicitada ? '2px solid #dc2626' : '1px solid #e2e8f0', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <span style={{ fontWeight: '900', color: '#d97706', fontSize: '1.25rem' }}>{nombreMesa}</span>
+                      <span style={{ fontSize: '0.75rem', background: esCuentaSolicitada ? '#fee2e2' : '#dcfce7', color: esCuentaSolicitada ? '#991b1b' : '#166534', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
+                        {esCuentaSolicitada ? '⚠ CUENTA SOLICITADA' : 'Activa 🟢'}
+                      </span>
+                    </div>
+
+                    <p style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '12px', background: '#f8fafc', padding: '8px', borderRadius: '8px' }}>
+                      👤 {cliente}
+                    </p>
+
+                    <ul style={{ fontSize: '0.875rem', color: '#334155', listStyle: 'none', padding: 0, margin: '0 0 16px 0', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '10px 0' }}>
+                      {itemsConsolidados.map((item, idx) => (
+                        <li key={idx} style={{ marginBottom: '8px', borderBottom: idx < itemsConsolidados.length - 1 ? '1px dashed #f1f5f9' : 'none', paddingBottom: '6px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                            <span>{item.cantidad}x {item.nombre}</span>
+                            <span>Q {(item.precio * item.cantidad).toFixed(2)}</span>
+                          </div>
+                          {item.notas && (
+                            <div style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 'bold', marginTop: '3px' }}>
+                              📝 Obs: {item.notas}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1rem', marginBottom: '16px' }}>
+                      <span>Total acumulado:</span>
+                      <span style={{ color: '#d97706' }}>Q {totalAcumulado.toFixed(2)}</span>
+                    </div>
+
+                    <button 
+                      onClick={() => liberarMesaGrupo(nombreMesa, listaPedidos, itemsConsolidados, totalAcumulado)}
+                      disabled={!esCuentaSolicitada}
+                      style={{ 
+                        background: esCuentaSolicitada ? '#dc2626' : '#cbd5e1', 
+                        color: 'white', 
+                        border: 'none', 
+                        padding: '12px', 
+                        borderRadius: '10px', 
+                        fontWeight: 'bold', 
+                        width: '100%', 
+                        cursor: esCuentaSolicitada ? 'pointer' : 'not-allowed', 
+                        fontSize: '0.875rem' 
+                      }}
+                    >
+                      {esCuentaSolicitada ? 'Cobrar y Liberar Mesa 💳' : 'Esperando cuenta... ⏳'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ================= VISTA GENERADOR DE QR (/qr) =================
   if (ruta === '/qr') {
@@ -462,7 +567,7 @@ export default function App() {
             <h1 style={{ fontSize: '1.5rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Generador de Códigos QR 📱</h1>
             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Crea y descarga los códigos QR para cada mesa</p>
           </div>
-          <a href="/" style={{ background: '#0f172a', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem' }}>Ir al Menú</a>
+          <button onClick={() => navegarA('/')} style={{ background: '#0f172a', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', cursor: 'pointer' }}>Ir al Menú</button>
         </div>
         <div style={{ background: 'white', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '30px', display: 'flex', alignItems: 'center', gap: '16px' }}>
           <label style={{ fontWeight: 'bold', fontSize: '0.875rem', color: '#334155' }}>Cantidad total de mesas:</label>
@@ -540,46 +645,74 @@ export default function App() {
       );
     }
 
+    const ordenesPendientes = pedidos.filter(p => p.estado === 'pendiente');
+
     return (
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px', fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px', marginBottom: '25px' }}>
           <div>
-            <h1 style={{ fontSize: '1.75rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Pantalla de Cocina 🍳</h1>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Monitoreo de pedidos en tiempo real</p>
+            <h1 style={{ fontSize: '2rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Pantalla de Cocina 🍳</h1>
+            <p style={{ fontSize: '1rem', color: '#64748b', margin: 0 }}>Monitoreo de comandas en tiempo real</p>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <a href="/admin" style={{ background: '#3b82f6', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center' }}>Ir al Panel Admin 🛠️</a>
-            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
+            <button onClick={() => navegarA('/admin')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 18px', borderRadius: '8px', fontWeight: 'bold', fontSize: '1rem', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>Ir al Panel Admin 🛠️</button>
+            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem' }}>Cerrar Sesión</button>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-          {pedidos.length === 0 ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '60px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-              <p style={{ fontSize: '1.2rem', color: '#94a3b8', margin: 0 }}>No hay mesas ocupadas o pedidos activos en este momento.</p>
-            </div>
-          ) : (
-            pedidos.map(pedido => {
-              const esCuentaSolicitada = pedido.estado === 'cuenta_solicitada';
+        {ordenesPendientes.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '80px 20px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+            <p style={{ fontSize: '1.4rem', color: '#94a3b8', margin: 0 }}>Sin comandas pendientes por mostrar en cocina por el momento.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '24px' }}>
+            {ordenesPendientes.map((pedido) => {
+              const horaEnvio = pedido.created_at 
+                ? new Date(pedido.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                : '';
+
+              const numeroPedido = pedido.id || (pedidos.findIndex(p => p.id === pedido.id) + 1);
+
               return (
-                <div key={pedido.id} style={{ background: 'white', borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', border: esCuentaSolicitada ? '2px solid #dc2626' : '1px solid #e2e8f0', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div 
+                  key={pedido.id} 
+                  style={{ 
+                    background: 'white', 
+                    borderRadius: '16px', 
+                    boxShadow: '0 4px 18px rgba(0,0,0,0.08)', 
+                    border: '2px solid #cbd5e1', 
+                    padding: '24px', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'space-between' 
+                  }}
+                >
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <span style={{ fontWeight: '900', color: '#d97706', fontSize: '1.25rem' }}>{pedido.mesa}</span>
-                      <span style={{ fontSize: '0.75rem', background: esCuentaSolicitada ? '#fee2e2' : '#dcfce7', color: esCuentaSolicitada ? '#991b1b' : '#166534', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
-                        {esCuentaSolicitada ? '⚠ CUENTA SOLICITADA' : 'Activa 🟢'}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '1.6rem', fontWeight: '900', color: '#0f172a' }}>
+                        Pedido #{numeroPedido}
+                      </span>
+                      <span style={{ fontSize: '1rem', background: '#fef3c7', color: '#b45309', padding: '6px 12px', borderRadius: '8px', fontWeight: '800' }}>
+                        {horaEnvio} 🕒
                       </span>
                     </div>
-                    <p style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '12px', background: '#f8fafc', padding: '8px', borderRadius: '8px' }}>👤 {pedido.cliente}</p>
-                    <ul style={{ fontSize: '0.875rem', color: '#334155', listStyle: 'none', padding: 0, margin: '0 0 16px 0', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '10px 0' }}>
+
+                    <div style={{ fontSize: '1.4rem', fontWeight: '900', color: '#d97706', marginBottom: '14px' }}>
+                      {pedido.mesa}
+                    </div>
+
+                    <p style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#334155', marginBottom: '16px', background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                      👤 {pedido.cliente}
+                    </p>
+
+                    <ul style={{ fontSize: '1.2rem', color: '#1e293b', listStyle: 'none', padding: 0, margin: '0 0 20px 0', borderTop: '2px solid #f1f5f9', borderBottom: '2px solid #f1f5f9', padding: '14px 0' }}>
                       {pedido.items && pedido.items.map((item, idx) => (
-                        <li key={idx} style={{ marginBottom: '8px', borderBottom: idx < pedido.items.length - 1 ? '1px dashed #f1f5f9' : 'none', paddingBottom: '6px' }}>
+                        <li key={idx} style={{ marginBottom: '12px', borderBottom: idx < pedido.items.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: '8px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                             <span>{item.cantidad}x {item.nombre}</span>
-                            <span>Q {(item.precio * item.cantidad).toFixed(2)}</span>
                           </div>
                           {item.notas && (
-                            <div style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 'bold', marginTop: '3px' }}>
+                            <div style={{ fontSize: '0.95rem', color: '#dc2626', fontWeight: 'bold', marginTop: '4px' }}>
                               📝 Obs: {item.notas}
                             </div>
                           )}
@@ -587,39 +720,38 @@ export default function App() {
                       ))}
                     </ul>
                   </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1rem', marginBottom: '16px' }}>
-                      <span>Total acumulado:</span>
-                      <span style={{ color: '#d97706' }}>Q {Number(pedido.total).toFixed(2)}</span>
-                    </div>
-                    <button 
-                      onClick={() => liberarMesa(pedido)}
-                      disabled={!esCuentaSolicitada}
-                      style={{ 
-                        background: esCuentaSolicitada ? '#dc2626' : '#cbd5e1', 
-                        color: 'white', 
-                        border: 'none', 
-                        padding: '12px', 
-                        borderRadius: '10px', 
-                        fontWeight: 'bold', 
-                        width: '100%', 
-                        cursor: esCuentaSolicitada ? 'pointer' : 'not-allowed', 
-                        fontSize: '0.875rem' 
-                      }}
-                    >
-                      {esCuentaSolicitada ? 'Cobrar y Liberar Mesa 💳' : 'Esperando cuenta... ⏳'}
-                    </button>
-                  </div>
+
+                  <button 
+                    onClick={() => despacharOrdenCocina(pedido.id)}
+                    style={{ 
+                      background: '#10b981', 
+                      color: 'white', 
+                      border: 'none', 
+                      padding: '16px', 
+                      borderRadius: '12px', 
+                      fontWeight: 'bold', 
+                      width: '100%', 
+                      cursor: 'pointer', 
+                      fontSize: '1.15rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 10px rgba(16, 185, 129, 0.25)'
+                    }}
+                  >
+                    Orden despachada ✅
+                  </button>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
     );
   }
 
-  // ================= VISTA ADMIN (/admin) - GESTIÓN DE MENÚ + ARCHIVO DE IMAGEN =================
+  // ================= VISTA ADMIN (/admin) =================
   if (ruta === '/admin') {
     if (!sesion) {
       return (
@@ -661,6 +793,25 @@ export default function App() {
       .filter(v => v.created_at && v.created_at.startsWith(mesActualStr))
       .reduce((acc, v) => acc + Number(v.total || 0), 0);
 
+    const mesasActivasUnicas = new Set(pedidos.map(p => p.mesa)).size;
+    const mesasDisponibles = Math.max(0, cantidadMesas - mesasActivasUnicas);
+
+    const conteoMesas = ventasHistoricas.reduce((acc, v) => {
+      if (v.mesa) {
+        acc[v.mesa] = (acc[v.mesa] || 0) + 1;
+      }
+      return acc;
+    }, {});
+
+    let mesaMasFrecuentada = 'N/A';
+    let maxFrecuencia = 0;
+    Object.entries(conteoMesas).forEach(([mesaNombre, count]) => {
+      if (count > maxFrecuencia) {
+        maxFrecuencia = count;
+        mesaMasFrecuentada = mesaNombre;
+      }
+    });
+
     return (
       <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px', fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px', marginBottom: '25px' }}>
@@ -669,15 +820,14 @@ export default function App() {
             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Gestión de Menú, Inventario y Reportes</p>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <a href="/cocina" style={{ background: '#10b981', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center' }}>Pantalla de Cocina 🍳</a>
-            <a href="/qr" style={{ background: '#f59e0b', color: 'white', textDecoration: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center' }}>Generar QRs 📱</a>
+            <button onClick={() => navegarA('/qr')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>Generar QRs 📱</button>
             <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
           </div>
         </div>
 
-        {/* SECCIÓN 1: AGREGAR PRODUCTOS AL MENÚ CON SELECCIÓN DE ARCHIVO */}
+        {/* SECCIÓN 1: AGREGAR PRODUCTOS AL MENÚ */}
         <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '35px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>🍽️ Agregar Nuevo Platillo, Bebida o Postre</h2>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>🍽 Agregar Nuevo Platillo, Bebida o Postre</h2>
           <form onSubmit={guardarProducto} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Nombre del Producto *</label>
@@ -696,21 +846,16 @@ export default function App() {
               <input type="number" step="0.01" placeholder="45.00" value={nuevoProd.precio} onChange={e => setNuevoProd({...nuevoProd, precio: e.target.value})} required style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Foto desde la Computadora</label>
-              <input 
-                type="file" 
-                accept="image/*" 
-                onChange={e => setArchivoImagen(e.target.files[0])} 
-                style={{ width: '100%', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box', background: '#f8fafc', fontSize: '0.75rem' }} 
-              />
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>URL de Imagen (Opcional)</label>
+              <input type="text" placeholder="https://imagen.com/foto.jpg" value={nuevoProd.imagen} onChange={e => setNuevoProd({...nuevoProd, imagen: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Descripción</label>
               <input type="text" placeholder="Breve descripción de ingredientes o preparación..." value={nuevoProd.descripcion} onChange={e => setNuevoProd({...nuevoProd, descripcion: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <button type="submit" disabled={subiendoImagen} style={{ background: '#10b981', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
-                {subiendoImagen ? 'Subiendo imagen y guardando...' : 'Guardar en el Menú Digital ➕'}
+              <button type="submit" style={{ background: '#10b981', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
+                Guardar en el Menú Digital ➕
               </button>
             </div>
           </form>
@@ -728,9 +873,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* SECCIÓN 2: DASHBOARD DE REPORTES */}
+        {/* SECCIÓN 2: DASHBOARD DE REPORTES, VENTAS Y ÚLTIMOS 3 MESES */}
         <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '35px' }}>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>📊 Dashboard de Ventas y Reportes</h2>
+          
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>VENTAS DE HOY 📅</p>
@@ -739,10 +885,6 @@ export default function App() {
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>VENTAS DEL MES 📊</p>
               <h3 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#3b82f6', margin: 0 }}>Q {ventasDelMes.toFixed(2)}</h3>
-            </div>
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>MESAS ACTIVAS ACTUALMENTE</p>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#d97706', margin: 0 }}>{pedidos.length}</h3>
             </div>
           </div>
 
@@ -775,6 +917,87 @@ export default function App() {
                 </div>
               );
             })()}
+          </div>
+        </div>
+
+        {/* SECCIÓN: DASHBOARD REPORTE DE MESAS */}
+        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '35px' }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🪑</span> Dashboard Reporte de Mesas
+          </h2>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                MESAS OCUPADAS 🔴
+              </span>
+              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#ef4444', margin: 0 }}>{mesasActivasUnicas}</p>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                MESAS DISPONIBLES 🟢
+              </span>
+              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#10b981', margin: 0 }}>{mesasDisponibles}</p>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                TOTAL DE MESAS 📊
+              </span>
+              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#2563eb', margin: 0 }}>{cantidadMesas}</p>
+            </div>
+          </div>
+
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#334155', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>📋</span> Resumen de Ocupación
+          </h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '500', display: 'block', marginBottom: '4px' }}>Mesa Más Frecuentada</span>
+              <p style={{ fontSize: '1.125rem', fontWeight: '800', color: '#1e293b', margin: 0 }}>{mesaMasFrecuentada}</p>
+            </div>
+
+            <button 
+              onClick={() => navegarA('/cocina')}
+              style={{ 
+                background: '#f8fafc', 
+                padding: '16px', 
+                borderRadius: '12px', 
+                border: '1px solid #e2e8f0', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                textAlign: 'center',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Monitoreo</span>
+              <p style={{ fontSize: '1rem', fontWeight: '800', color: '#10b981', margin: 0 }}>Pantalla de Cocina 🍳</p>
+            </button>
+
+            <button 
+              onClick={() => navegarA('/mesas')} 
+              style={{ 
+                background: '#f8fafc', 
+                padding: '16px', 
+                borderRadius: '12px', 
+                border: '1px solid #e2e8f0', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                textAlign: 'center',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Ver Estado</span>
+              <p style={{ fontSize: '1rem', fontWeight: '800', color: '#2563eb', margin: 0 }}>Detalle de Mesas 🪑</p>
+            </button>
           </div>
         </div>
 
@@ -833,9 +1056,9 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <p style={{ fontSize: '0.875rem', fontWeight: '600', color: '#d97706', margin: 0 }}>Mesa #{mesa} • Menú Digital</p>
             <span style={{ color: '#cbd5e1' }}>|</span>
-            <a href="/admin" style={{ fontSize: '0.75rem', color: '#64748b', textDecoration: 'none', fontWeight: '600' }}>Admin 🛠️</a>
+            <button onClick={() => navegarA('/admin')} style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: '#64748b', fontWeight: '600', cursor: 'pointer', padding: 0 }}>Admin 🛠️</button>
             <span style={{ color: '#cbd5e1' }}>|</span>
-            <a href="/cocina" style={{ fontSize: '0.75rem', color: '#10b981', textDecoration: 'none', fontWeight: '600' }}>Cocina 🍳</a>
+            <button onClick={() => navegarA('/cocina')} style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: '#10b981', fontWeight: '600', cursor: 'pointer', padding: 0 }}>Cocina 🍳</button>
           </div>
         </div>
         <button 
@@ -912,7 +1135,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Cuadro de texto para observaciones personalizadas */}
                   <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
                     <input
                       type="text"
