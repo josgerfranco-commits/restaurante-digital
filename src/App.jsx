@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { QRCodeCanvas } from 'qrcode.react';
+import Despedida from './Despedida';
 
 export default function App() {
   const [ruta, setRuta] = useState('/');
@@ -30,8 +31,9 @@ export default function App() {
   const [ventasHistoricas, setVentasHistoricas] = useState([]);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
-  // Estados para Administrar Productos en Admin
-  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
+  // Estados para Administrar Productos en Admin (archivo de imagen local)
+  const [nuevoProd, setNuevoProd] = useState({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
+  const [imagenArchivo, setImagenArchivo] = useState(null);
 
   // Estado para generador de QR
   const [cantidadMesas, setCantidadMesas] = useState(6);
@@ -233,17 +235,28 @@ export default function App() {
     }
 
     try {
+      let imagenUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80';
+
+      if (imagenArchivo) {
+        imagenUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(imagenArchivo);
+        });
+      }
+
       const { error } = await supabase.from('productos').insert([{
         nombre: nuevoProd.nombre,
         descripcion: nuevoProd.descripcion,
         precio: parseFloat(nuevoProd.precio),
         categoria: nuevoProd.categoria,
-        imagen: nuevoProd.imagen || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+        imagen: imagenUrl
       }]);
 
       if (error) throw error;
 
-      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida', imagen: '' });
+      setNuevoProd({ nombre: '', descripcion: '', precio: '', categoria: 'Comida' });
+      setImagenArchivo(null);
       alert('¡Producto agregado exitosamente al menú!');
       fetchProductos();
     } catch (err) {
@@ -409,7 +422,6 @@ export default function App() {
         .eq('mesa', nombreMesaStr);
 
       setCuentaSolicitada(true);
-      alert('¡Cuenta solicitada! Un mesero se acercará a cobrar en breve.');
     } catch (err) {
       console.error('Error al solicitar cuenta:', err);
     }
@@ -706,14 +718,15 @@ export default function App() {
                       👤 {pedido.cliente}
                     </p>
 
-                    <ul style={{ fontSize: '1.2rem', color: '#1e293b', listStyle: 'none', padding: 0, margin: '0 0 20px 0', borderTop: '2px solid #f1f5f9', borderBottom: '2px solid #f1f5f9', padding: '14px 0' }}>
+                    <ul style={{ fontSize: '1.2rem', color: '#1e293b', listStyle: 'none', padding: 0, margin: '0 0 20px 0', borderTop: '2px solid #f1f5f9', borderBottom: '2px solid #f1f5f9', padding: '12px 0' }}>
                       {pedido.items && pedido.items.map((item, idx) => (
-                        <li key={idx} style={{ marginBottom: '12px', borderBottom: idx < pedido.items.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: '8px' }}>
+                        <li key={idx} style={{ marginBottom: '10px', borderBottom: idx < pedido.items.length - 1 ? '1px dashed #e2e8f0' : 'none', paddingBottom: '8px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                             <span>{item.cantidad}x {item.nombre}</span>
+                            <span>Q {(item.precio * item.cantidad).toFixed(2)}</span>
                           </div>
                           {item.notas && (
-                            <div style={{ fontSize: '0.95rem', color: '#dc2626', fontWeight: 'bold', marginTop: '4px' }}>
+                            <div style={{ fontSize: '0.9rem', color: '#dc2626', fontWeight: 'bold', marginTop: '4px' }}>
                               📝 Obs: {item.notas}
                             </div>
                           )}
@@ -728,20 +741,16 @@ export default function App() {
                       background: '#10b981', 
                       color: 'white', 
                       border: 'none', 
-                      padding: '16px', 
+                      padding: '14px', 
                       borderRadius: '12px', 
                       fontWeight: 'bold', 
                       width: '100%', 
                       cursor: 'pointer', 
-                      fontSize: '1.15rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      boxShadow: '0 4px 10px rgba(16, 185, 129, 0.25)'
+                      fontSize: '1rem',
+                      boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)' 
                     }}
                   >
-                    Orden despachada ✅
+                    Marcar como Despachado ✓
                   </button>
                 </div>
               );
@@ -752,13 +761,13 @@ export default function App() {
     );
   }
 
-  // ================= VISTA ADMIN (/admin) =================
+  // ================= VISTA DE ADMIN PRINCIPAL (/admin) =================
   if (ruta === '/admin') {
     if (!sesion) {
       return (
         <div style={{ maxWidth: '400px', margin: '80px auto', background: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0', fontFamily: 'sans-serif' }}>
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 4px 0' }}>Panel Admin - Terra Viva</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 4px 0' }}>Panel de Administración 🛠️</h2>
             <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Inicia sesión como administrador</p>
           </div>
           {errorLogin && (
@@ -783,272 +792,153 @@ export default function App() {
       );
     }
 
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const mesActualStr = hoyStr.substring(0, 7);
+    const totalVentasHistoricas = ventasHistoricas.reduce((acc, v) => acc + Number(v.total || 0), 0);
 
-    const ventasDelDia = ventasHistoricas
-      .filter(v => v.created_at && v.created_at.startsWith(hoyStr))
-      .reduce((acc, v) => acc + Number(v.total || 0), 0);
-
-    const ventasDelMes = ventasHistoricas
-      .filter(v => v.created_at && v.created_at.startsWith(mesActualStr))
-      .reduce((acc, v) => acc + Number(v.total || 0), 0);
-
-    const mesasActivasUnicas = new Set(pedidos.map(p => p.mesa)).size;
-    const mesasDisponibles = Math.max(0, cantidadMesas - mesasActivasUnicas);
-
-    const conteoMesas = ventasHistoricas.reduce((acc, v) => {
-      if (v.mesa) {
-        acc[v.mesa] = (acc[v.mesa] || 0) + 1;
-      }
+    // Agrupar productos por categoría para el panel de administración
+    const productosPorCategoria = productos.reduce((acc, p) => {
+      const cat = p.categoria || 'Comida';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(p);
       return acc;
     }, {});
 
-    let mesaMasFrecuentada = 'N/A';
-    let maxFrecuencia = 0;
-    Object.entries(conteoMesas).forEach(([mesaNombre, count]) => {
-      if (count > maxFrecuencia) {
-        maxFrecuencia = count;
-        mesaMasFrecuentada = mesaNombre;
-      }
-    });
-
     return (
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px', fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px', fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px', marginBottom: '25px' }}>
           <div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: '900', margin: '0 0 2px 0', color: '#0f172a' }}>Panel de Administración 🛠️</h1>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Gestión de Menú, Inventario y Reportes</p>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: '900', margin: '0 0 4px 0', color: '#0f172a' }}>Panel de Administración 🛠️</h1>
+            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Gestión de productos del menú y control general</p>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => navegarA('/qr')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>Generar QRs 📱</button>
-            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.875rem' }}>Cerrar Sesión</button>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button onClick={() => navegarA('/cocina')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', cursor: 'pointer' }}>Ver Cocina 🍳</button>
+            <button onClick={() => navegarA('/mesas')} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', cursor: 'pointer' }}>Ver Mesas 🪑</button>
+            <button onClick={() => navegarA('/qr')} style={{ background: '#8b5cf6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', cursor: 'pointer' }}>Generar QRs 📱</button>
+            <button onClick={cerrarSesion} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.875rem', cursor: 'pointer' }}>Cerrar Sesión</button>
           </div>
         </div>
 
-        {/* SECCIÓN 1: AGREGAR PRODUCTOS AL MENÚ */}
-        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '35px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>🍽 Agregar Nuevo Platillo, Bebida o Postre</h2>
+        {/* Resumen de Ventas Históricas */}
+        <div style={{ background: 'white', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '30px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 10px 0' }}>💰 Resumen de Caja y Ventas Históricas</h3>
+          <p style={{ fontSize: '1.25rem', fontWeight: '900', color: '#d97706', margin: '0 0 16px 0' }}>Total Acumulado Cobrado: Q {totalVentasHistoricas.toFixed(2)}</p>
+          
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            {ventasHistoricas.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: 0 }}>Aún no hay registros de ventas anteriores.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Mesa</th>
+                    <th style={{ padding: '8px' }}>Cliente</th>
+                    <th style={{ padding: '8px' }}>Total</th>
+                    <th style={{ padding: '8px' }}>Fecha / Hora</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ventasHistoricas.map((v, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px', fontWeight: 'bold' }}>{v.mesa}</td>
+                      <td style={{ padding: '8px' }}>{v.cliente}</td>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#d97706' }}>Q {Number(v.total).toFixed(2)}</td>
+                      <td style={{ padding: '8px', color: '#64748b' }}>{new Date(v.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* Formulario para Agregar Producto con Subida de Archivo Local */}
+        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '30px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>Agregar Nuevo Platillo o Bebida ➕</h3>
           <form onSubmit={guardarProducto} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Nombre del Producto *</label>
-              <input type="text" placeholder="Ej. Margaritas / Flan" value={nuevoProd.nombre} onChange={e => setNuevoProd({...nuevoProd, nombre: e.target.value})} required style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Nombre</label>
+              <input type="text" placeholder="Ej. Lomo Saltado" value={nuevoProd.nombre} onChange={(e) => setNuevoProd({ ...nuevoProd, nombre: e.target.value })} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Categoría *</label>
-              <select value={nuevoProd.categoria} onChange={e => setNuevoProd({...nuevoProd, categoria: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box', background: 'white' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Descripción</label>
+              <input type="text" placeholder="Ej. Jugoso corte..." value={nuevoProd.descripcion} onChange={(e) => setNuevoProd({ ...nuevoProd, descripcion: e.target.value })} style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Precio (Q)</label>
+              <input type="number" step="0.01" placeholder="75.00" value={nuevoProd.precio} onChange={(e) => setNuevoProd({ ...nuevoProd, precio: e.target.value })} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Categoría</label>
+              <select value={nuevoProd.categoria} onChange={(e) => setNuevoProd({ ...nuevoProd, categoria: e.target.value })} style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', boxSizing: 'border-box', background: 'white' }}>
                 <option value="Comida">Comida</option>
                 <option value="Bebidas">Bebidas</option>
                 <option value="Postres">Postres</option>
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Precio (Q) *</label>
-              <input type="number" step="0.01" placeholder="45.00" value={nuevoProd.precio} onChange={e => setNuevoProd({...nuevoProd, precio: e.target.value})} required style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Subir Imagen de la PC</label>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => setImagenArchivo(e.target.files[0])} 
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.8rem', background: '#f8fafc', boxSizing: 'border-box' }} 
+              />
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>URL de Imagen (Opcional)</label>
-              <input type="text" placeholder="https://imagen.com/foto.jpg" value={nuevoProd.imagen} onChange={e => setNuevoProd({...nuevoProd, imagen: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Descripción</label>
-              <input type="text" placeholder="Breve descripción de ingredientes o preparación..." value={nuevoProd.descripcion} onChange={e => setNuevoProd({...nuevoProd, descripcion: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <button type="submit" style={{ background: '#10b981', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
-                Guardar en el Menú Digital ➕
-              </button>
-            </div>
+            <button type="submit" style={{ background: '#0f172a', color: 'white', border: 'none', padding: '11px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Guardar Platillo</button>
           </form>
-
-          <div style={{ marginTop: '24px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-            <h4 style={{ fontSize: '0.9rem', color: '#475569', margin: '0 0 10px 0' }}>Productos actuales en la Base de Datos ({productos.length}):</h4>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', maxHeight: '160px', overflowY: 'auto' }}>
-              {productos.map(p => (
-                <div key={p.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem' }}>
-                  <span><b>{p.nombre}</b> ({p.categoria}) - Q {p.precio}</span>
-                  <button onClick={() => eliminarProducto(p.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 6px', fontWeight: 'bold' }}>✕</button>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {/* SECCIÓN 2: DASHBOARD DE REPORTES, VENTAS Y ÚLTIMOS 3 MESES */}
-        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '35px' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>📊 Dashboard de Ventas y Reportes</h2>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>VENTAS DE HOY 📅</p>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#10b981', margin: 0 }}>Q {ventasDelDia.toFixed(2)}</h3>
-            </div>
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>VENTAS DEL MES 📊</p>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#3b82f6', margin: 0 }}>Q {ventasDelMes.toFixed(2)}</h3>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '24px' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '12px' }}>🗓️ Historial de Ventas de los Últimos 3 Meses</h3>
-            {(() => {
-              const mesesList = [];
-              const fechaActual = new Date();
-              
-              for (let i = 0; i < 3; i++) {
-                const d = new Date(fechaActual.getFullYear(), fechaActual.getMonth() - i, 1);
-                const anioMesStr = d.toISOString().substring(0, 7);
-                const nombreMes = d.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-                
-                const totalMes = ventasHistoricas
-                  .filter(v => v.created_at && v.created_at.startsWith(anioMesStr))
-                  .reduce((acc, v) => acc + Number(v.total || 0), 0);
-
-                mesesList.push({ nombreMes, totalMes });
-              }
-
-              return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                  {mesesList.map((m, idx) => (
-                    <div key={idx} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', textTransform: 'capitalize' }}>
-                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 4px 0', fontWeight: 'bold' }}>{m.nombreMes}</p>
-                      <h4 style={{ fontSize: '1.25rem', fontWeight: '900', color: '#0f172a', margin: 0 }}>Q {m.totalMes.toFixed(2)}</h4>
+        {/* Listado de Productos Actuales Ordenados por Categoría */}
+        <h3 style={{ fontSize: '1.3rem', fontWeight: '900', color: '#0f172a', marginBottom: '20px' }}>Platillos en el Menú Actual (Ordenados por Categoría)</h3>
+        
+        {Object.keys(productosPorCategoria).length === 0 ? (
+          <p style={{ color: '#94a3b8' }}>No hay productos en el menú.</p>
+        ) : (
+          Object.entries(productosPorCategoria).map(([categoria, listaProds]) => (
+            <div key={categoria} style={{ marginBottom: '30px' }}>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#d97706', borderBottom: '2px solid #e2e8f0', paddingBottom: '6px', marginBottom: '14px' }}>
+                🍽️ {categoria}
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+                {listaProds.map(p => (
+                  <div key={p.id} style={{ background: 'white', borderRadius: '12px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
+                    <img src={p.imagen} alt={p.nombre} style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '8px' }} />
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ fontWeight: 'bold', fontSize: '0.95rem', margin: '0 0 2px 0', color: '#0f172a' }}>{p.nombre}</h4>
+                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 6px 0' }}>Q {Number(p.precio).toFixed(2)}</p>
+                      <button onClick={() => eliminarProducto(p.id)} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 8px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' }}>Eliminar</button>
                     </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* SECCIÓN: DASHBOARD REPORTE DE MESAS */}
-        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '35px' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🪑</span> Dashboard Reporte de Mesas
-          </h2>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                MESAS OCUPADAS 🔴
-              </span>
-              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#ef4444', margin: 0 }}>{mesasActivasUnicas}</p>
-            </div>
-
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                MESAS DISPONIBLES 🟢
-              </span>
-              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#10b981', margin: 0 }}>{mesasDisponibles}</p>
-            </div>
-
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                TOTAL DE MESAS 📊
-              </span>
-              <p style={{ fontSize: '1.5rem', fontWeight: '900', color: '#2563eb', margin: 0 }}>{cantidadMesas}</p>
-            </div>
-          </div>
-
-          <h3 style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#334155', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>📋</span> Resumen de Ocupación
-          </h3>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '500', display: 'block', marginBottom: '4px' }}>Mesa Más Frecuentada</span>
-              <p style={{ fontSize: '1.125rem', fontWeight: '800', color: '#1e293b', margin: 0 }}>{mesaMasFrecuentada}</p>
-            </div>
-
-            <button 
-              onClick={() => navegarA('/cocina')}
-              style={{ 
-                background: '#f8fafc', 
-                padding: '16px', 
-                borderRadius: '12px', 
-                border: '1px solid #e2e8f0', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                textAlign: 'center',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                cursor: 'pointer'
-              }}
-            >
-              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Monitoreo</span>
-              <p style={{ fontSize: '1rem', fontWeight: '800', color: '#10b981', margin: 0 }}>Pantalla de Cocina 🍳</p>
-            </button>
-
-            <button 
-              onClick={() => navegarA('/mesas')} 
-              style={{ 
-                background: '#f8fafc', 
-                padding: '16px', 
-                borderRadius: '12px', 
-                border: '1px solid #e2e8f0', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                textAlign: 'center',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                cursor: 'pointer'
-              }}
-            >
-              <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Ver Estado</span>
-              <p style={{ fontSize: '1rem', fontWeight: '800', color: '#2563eb', margin: 0 }}>Detalle de Mesas 🪑</p>
-            </button>
-          </div>
-        </div>
-
-        {/* SECCIÓN 3: INVENTARIO */}
-        <div style={{ background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)' }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', margin: '0 0 16px 0' }}>📦 Control de Inventario / Catálogo</h2>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
-              <thead>
-                <tr style={{ background: '#f1f5f9', color: '#475569' }}>
-                  <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>ID</th>
-                  <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Producto</th>
-                  <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Categoría</th>
-                  <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Precio Unitario</th>
-                </tr>
-              </thead>
-              <tbody>
-                {productos.map(p => (
-                  <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '10px', color: '#64748b' }}>#{p.id}</td>
-                    <td style={{ padding: '10px', fontWeight: 'bold', color: '#0f172a' }}>{p.nombre}</td>
-                    <td style={{ padding: '10px' }}>
-                      <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                        {p.categoria || 'Comida'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px', fontWeight: 'bold', color: '#d97706' }}>Q {Number(p.precio).toFixed(2)}</td>
-                  </tr>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  // ================= PANTALLA DE DESPEDIDA / MESA LIBERADA =================
+  if (mesaLiberada) {
+    return <Despedida />;
+  }
+
+  // ================= PANTALLA DE ESPERA (CUENTA SOLICITADA) =================
+  if (cuentaSolicitada) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', padding: '20px', fontFamily: 'sans-serif' }}>
+        <div style={{ background: 'white', padding: '40px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', textAlign: 'center', maxWidth: '450px', width: '100%', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>✨</div>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#0f172a', margin: '0 0 12px 0' }}>¡Gracias por preferirnos!</h1>
+          <p style={{ fontSize: '1rem', color: '#64748b', lineHeight: '1.5', margin: 0 }}>
+            En un momento llegará un mesero a cobrar.<br />
+            El código QR ha quedado listo para liberar.
+          </p>
         </div>
       </div>
     );
   }
 
   // ================= VISTA CLIENTE / MENÚ DIGITAL =================
-  if (mesaLiberada) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', padding: '20px', fontFamily: 'sans-serif' }}>
-        <div style={{ background: 'white', padding: '40px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', textAlign: 'center', maxWidth: '450px', width: '100%', border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>✨</div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#0f172a', margin: '0 0 12px 0' }}>¡Gracias por visitarnos!</h1>
-          <p style={{ fontSize: '1rem', color: '#64748b', margin: 0 }}>Esperamos que vuelva pronto.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b', paddingBottom: '80px', fontFamily: 'sans-serif' }}>
       <header style={{ background: 'white', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 30, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1057,11 +947,10 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <p style={{ fontSize: '0.875rem', fontWeight: '600', color: '#d97706', margin: 0 }}>Mesa #{mesa} • Menú Digital</p>
             <span style={{ color: '#cbd5e1' }}>|</span>
-            <button onClick={() => navegarA('/admin')} style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: '#64748b', fontWeight: '600', cursor: 'pointer', padding: 0 }}>Admin 🛠️</button>
-            <span style={{ color: '#cbd5e1' }}>|</span>
-            <button onClick={() => navegarA('/cocina')} style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: '#10b981', fontWeight: '600', cursor: 'pointer', padding: 0 }}>Cocina 🍳</button>
+            <a href="/admin" style={{ fontSize: '0.75rem', color: '#64748b', textDecoration: 'none', fontWeight: '600' }}>Admin 🛠️</a>
           </div>
         </div>
+        
         <button 
           onClick={() => setModalCarrito(true)}
           style={{ position: 'relative', background: '#0f172a', color: 'white', padding: '12px', borderRadius: '50%', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
@@ -1097,6 +986,7 @@ export default function App() {
                 color: categoriaActiva === cat ? 'white' : '#475569',
                 cursor: 'pointer',
                 boxShadow: categoriaActiva === cat ? '0 4px 12px rgba(245, 158, 11, 0.3)' : 'none',
+                transition: 'all 0.2s'
               }}
             >
               {cat}
@@ -1104,81 +994,75 @@ export default function App() {
           ))}
         </div>
 
-        {/* Lista de Productos Dinámicos */}
+        {/* Lista de Productos */}
         <div style={{ display: 'grid', gap: '16px', marginBottom: '32px' }}>
           {productosFiltrados.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 0', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-              <p style={{ color: '#94a3b8', margin: 0 }}>No hay productos en esta categoría todavía.</p>
+              <p style={{ color: '#94a3b8', margin: 0 }}>No hay productos disponibles en esta categoría.</p>
             </div>
           ) : (
             productosFiltrados.map(prod => {
-              const obsActual = observacionesTemp[prod.id] || '';
+              const prodId = prod.id;
+              const prodNombre = prod.nombre;
+              const prodDesc = prod.descripcion;
+              const prodPrecio = Number(prod.precio || 0);
+              const prodImagen = prod.imagen;
+              const obsActual = observacionesTemp[prodId] || '';
 
               return (
-                <div key={prod.id} style={{ background: 'white', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                    {prod.imagen && (
-                      <img src={prod.imagen} alt={prod.nombre} style={{ width: '96px', height: '96px', objectFit: 'cover', borderRadius: '12px', flexShrink: 0 }} />
+                <div key={prodId} style={{ background: 'white', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', justifyContent: 'space-between' }}>
+                    {prodImagen && (
+                      <img src={prodImagen} alt={prodNombre} style={{ width: '96px', height: '96px', objectFit: 'cover', borderRadius: '12px', flexShrink: 0 }} />
                     )}
                     <div style={{ flex: 1 }}>
-                      <h3 style={{ fontWeight: 'bold', fontSize: '1rem', color: '#0f172a', margin: '0 0 4px 0' }}>{prod.nombre}</h3>
-                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px 0', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{prod.descripcion}</p>
+                      <h3 style={{ fontWeight: 'bold', fontSize: '1rem', color: '#0f172a', margin: '0 0 4px 0' }}>{prodNombre}</h3>
+                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px 0', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{prodDesc}</p>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontWeight: '800', fontSize: '1rem', color: '#0f172a' }}>Q {Number(prod.precio).toFixed(2)}</span>
+                        <span style={{ fontWeight: '800', fontSize: '1rem', color: '#0f172a' }}>Q {prodPrecio.toFixed(2)}</span>
                         <button
                           onClick={() => agregarAlCarrito(prod)}
-                          disabled={cuentaSolicitada}
-                          style={{ background: cuentaSolicitada ? '#94a3b8' : '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '8px 16px', borderRadius: '12px', fontSize: '0.75rem', cursor: cuentaSolicitada ? 'not-allowed' : 'pointer' }}
+                          style={{ background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '8px 16px', borderRadius: '12px', fontSize: '0.75rem', cursor: 'pointer', boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)' }}
                         >
-                          {cuentaSolicitada ? 'Cuenta pedida 🧾' : 'Añadir +'}
+                          Añadir +
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
-                    <input
-                      type="text"
-                      placeholder="Observaciones (ej. Sin cebolla, término medio, sin hielo...)"
-                      value={obsActual}
-                      onChange={(e) => setObservacionesTemp({ ...observacionesTemp, [prod.id]: e.target.value })}
-                      disabled={cuentaSolicitada}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '8px',
-                        fontSize: '0.75rem',
-                        background: '#f8fafc',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
+                  {/* Input de Observaciones por platillo */}
+                  <input 
+                    type="text" 
+                    placeholder="Observaciones (ej. Sin cebolla, término medio...)" 
+                    value={obsActual}
+                    onChange={(e) => setObservacionesTemp({ ...observacionesTemp, [prodId]: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '0.75rem', boxSizing: 'border-box', background: '#f8fafc' }}
+                  />
                 </div>
               );
             })
           )}
         </div>
 
-        {/* Botón Solicitar Cuenta */}
+        {/* Botón Solicitar Cuenta al final de la página */}
         <div style={{ textAlign: 'center', marginTop: '20px' }}>
           <button
             onClick={solicitarCuenta}
-            disabled={cuentaSolicitada}
             style={{
               width: '100%',
               maxWidth: '300px',
-              background: cuentaSolicitada ? '#64748b' : '#dc2626',
+              background: '#dc2626',
               color: 'white',
               border: 'none',
               padding: '14px 20px',
               borderRadius: '12px',
               fontWeight: 'bold',
               fontSize: '1rem',
-              cursor: cuentaSolicitada ? 'not-allowed' : 'pointer'
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)'
             }}
           >
-            {cuentaSolicitada ? 'Cuenta Solicitada 🧾' : 'Solicitar Cuenta 🧾'}
+            Solicitar Cuenta 🧾
           </button>
         </div>
       </main>
@@ -1197,13 +1081,7 @@ export default function App() {
                 <div style={{ textAlign: 'center', padding: '64px 0' }}>
                   <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🎉</div>
                   <h4 style={{ fontWeight: 'bold', fontSize: '1.25rem', color: '#0f172a', margin: '0 0 8px 0' }}>¡Pedido enviado con éxito!</h4>
-                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>La cocina ya recibió tu orden.</p>
-                </div>
-              ) : cuentaSolicitada ? (
-                <div style={{ textAlign: 'center', padding: '48px 0' }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🧾</div>
-                  <h4 style={{ fontWeight: 'bold', fontSize: '1.25rem', color: '#0f172a', margin: '0 0 8px 0' }}>Cuenta Solicitada</h4>
-                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Un mesero se acercará a cobrar en breve.</p>
+                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>La cocina ya recibió tu orden. ¡Buen provecho!</p>
                 </div>
               ) : carrito.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '64px 0', color: '#94a3b8' }}>
@@ -1217,10 +1095,10 @@ export default function App() {
                       <div key={item.cartItemId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                         <div>
                           <h5 style={{ fontWeight: 'bold', fontSize: '0.875rem', color: '#1e293b', margin: '0 0 2px 0' }}>{item.nombre}</h5>
+                          <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 2px 0' }}>Q {Number(item.precio).toFixed(2)} c/u</p>
                           {item.notas && (
-                            <p style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 'bold', margin: '0 0 2px 0' }}>📝 Obs: {item.notas}</p>
+                            <p style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 'bold', margin: 0 }}>Obs: {item.notas}</p>
                           )}
-                          <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Q {Number(item.precio).toFixed(2)} c/u</p>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <button onClick={() => cambiarCantidad(item.cartItemId, -1)} style={{ width: '28px', height: '28px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
@@ -1232,15 +1110,31 @@ export default function App() {
                   </div>
 
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                    {/* Campos de Cliente y NIT condicionales */}
                     {!tienePedidoActivo && (
                       <>
                         <div style={{ marginBottom: '12px' }}>
                           <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Cliente <span style={{ color: '#dc2626' }}>*</span></label>
-                          <input type="text" placeholder="Ej. Juan Pérez" value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }} />
+                          <input 
+                            type="text" 
+                            placeholder="Ej. Juan Pérez"
+                            value={nombreCliente}
+                            onChange={(e) => setNombreCliente(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }}
+                          />
                         </div>
+
                         <div style={{ marginBottom: '16px' }}>
                           <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>NIT <span style={{ color: '#dc2626' }}>*</span></label>
-                          <input type="text" placeholder="Ej. 1234567-8 o C/F" value={nitCliente} onChange={(e) => setNitCliente(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }} />
+                          <input 
+                            type="text" 
+                            placeholder="Ej. 1234567-8 o C/F"
+                            value={nitCliente}
+                            onChange={(e) => setNitCliente(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.875rem', background: '#f8fafc', boxSizing: 'border-box' }}
+                          />
                         </div>
                       </>
                     )}
@@ -1252,7 +1146,7 @@ export default function App() {
 
                     <button 
                       onClick={enviarPedido}
-                      style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer' }}
+                      style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', fontWeight: 'bold', padding: '12px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
                     >
                       Enviar Pedido a Cocina 🚀
                     </button>
