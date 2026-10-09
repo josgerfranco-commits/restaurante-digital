@@ -671,7 +671,8 @@ export default function App() {
                 ? new Date(pedido.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                 : '';
 
-              const numeroPedido = pedido.id || (pedidos.findIndex(p => p.id === pedido.id) + 1);
+              const pedidosDeEstaMesa = pedidos.filter(p => p.mesa === pedido.mesa);
+              const numeroPedido = pedidosDeEstaMesa.findIndex(p => p.id === pedido.id) + 1;
 
               return (
                 <div 
@@ -689,16 +690,16 @@ export default function App() {
                 >
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={{ fontSize: '1.6rem', fontWeight: '900', color: '#0f172a' }}>
-                        Pedido #{numeroPedido}
+                      <span style={{ fontSize: '1.6rem', fontWeight: '900', color: '#d97706' }}>
+                        {pedido.mesa}
                       </span>
                       <span style={{ fontSize: '1rem', background: '#fef3c7', color: '#b45309', padding: '6px 12px', borderRadius: '8px', fontWeight: '800' }}>
                         {horaEnvio} 🕒
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '1.4rem', fontWeight: '900', color: '#d97706', marginBottom: '14px' }}>
-                      {pedido.mesa}
+                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#0f172a', marginBottom: '14px' }}>
+                      Pedido #{numeroPedido}
                     </div>
 
                     <p style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#334155', marginBottom: '16px', background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
